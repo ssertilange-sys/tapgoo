@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { supabase } from "../lib/supabaseClient";
 import {
   ArrowRight,
   Users,
@@ -29,10 +30,6 @@ import {
 
 /* ----------------------------------------------------------
    PHOTO DU HERO
-   - heroPhoto : ta photo locale, depuis /public/hero-tapgoo.jpg
-   - heroPhotoFallback : URL externe utilisée si la photo locale
-     ne se charge pas (ex. aperçu Claude qui n'a pas accès au /public local)
-   En production sur ton site, c'est toujours ta photo qui est servie.
    ---------------------------------------------------------- */
 const heroPhoto = "/hero-tapgoo.jpg";
 const heroPhotoFallback =
@@ -47,13 +44,7 @@ function handleHeroPhotoError(e) {
 }
 
 /* ----------------------------------------------------------
-   IMAGES MÉTIER — Covoiturage, Recharge, Entreprises
-   À placer dans /public/ :
-     - covoiturage-amis.jpg
-     - recharge-mutualisee-entreprise.jpg
-     - salaries-mobilite-entreprise.jpg
-   Fallbacks Unsplash utilisés si l'image locale ne se charge pas
-   (utile pour l'aperçu Claude qui n'a pas accès à ton /public).
+   IMAGES MÉTIER
    ---------------------------------------------------------- */
 const IMAGES = {
   covoiturage: "/covoiturage-amis.jpg",
@@ -71,7 +62,6 @@ const IMAGES_FALLBACK = {
 
 function handleImageError(e) {
   const src = e.currentTarget.src;
-  // Cherche la clé locale correspondante pour basculer sur son fallback
   const key = Object.keys(IMAGES).find((k) => src.indexOf(IMAGES[k]) !== -1);
   if (key && src.indexOf(IMAGES_FALLBACK[key]) === -1) {
     e.currentTarget.src = IMAGES_FALLBACK[key];
@@ -103,6 +93,13 @@ const animations = `
 export default function TapgooLanding() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user);
+    });
+  }, []);
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 80);
@@ -114,7 +111,11 @@ export default function TapgooLanding() {
     <div className="bg-white text-neutral-900">
       <style>{animations}</style>
 
-      <Header scrolled={scrolled} onOpenMobile={() => setMobileOpen(true)} />
+      <Header
+        scrolled={scrolled}
+        user={user}
+        onOpenMobile={() => setMobileOpen(true)}
+      />
       <MobileMenu open={mobileOpen} onClose={() => setMobileOpen(false)} />
 
       <Hero />
@@ -130,7 +131,10 @@ export default function TapgooLanding() {
 }
 
 /* HEADER */
-function Header({ scrolled, onOpenMobile }) {
+function Header({ scrolled, user, onOpenMobile }) {
+  const firstName =
+    user?.user_metadata?.full_name?.split(" ")[0] || "Utilisateur";
+
   return (
     <header
       className={
@@ -170,9 +174,42 @@ function Header({ scrolled, onOpenMobile }) {
           >
             Espace pro →
           </a>
-          <button className="hidden rounded-full bg-emerald-500 px-5 py-2.5 text-sm font-bold text-white shadow-lg transition hover:bg-emerald-600 sm:inline-flex">
-            Se connecter
-          </button>
+
+          {user ? (
+            <div className="hidden items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-2 backdrop-blur-md md:flex">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-400 font-bold text-black">
+                {firstName[0].toUpperCase()}
+              </div>
+              <span className="text-sm font-medium text-white">
+                Bonjour {firstName}
+              </span>
+              <button
+                onClick={async () => {
+                  await supabase.auth.signOut();
+                  window.location.reload();
+                }}
+                className="text-xs text-white/70 transition hover:text-red-400"
+              >
+                Déconnexion
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={async () => {
+                const { error } = await supabase.auth.signInWithOAuth({
+                  provider: "google",
+                });
+                if (error) {
+                  console.error(error);
+                  alert("Erreur connexion Google");
+                }
+              }}
+              className="hidden rounded-full border border-emerald-400/30 bg-emerald-400/10 px-5 py-2 text-sm font-medium text-emerald-300 backdrop-blur-md transition hover:bg-emerald-400/20 md:block"
+            >
+              Connexion
+            </button>
+          )}
+
           <button
             onClick={onOpenMobile}
             className="flex h-11 w-11 items-center justify-center rounded-full border border-white/15 bg-white/5 text-white backdrop-blur transition hover:bg-white/10 xl:hidden"
@@ -247,7 +284,6 @@ function Hero() {
 
       {/* ----- MOBILE : photo en haut, contenu en dessous ----- */}
       <div className="md:hidden">
-        {/* Photo : hauteur fixe garantie (vh + min/max en inline pour fiabilité) */}
         <div
           className="relative w-full overflow-hidden bg-neutral-900"
           style={{ height: "55vh", minHeight: "320px", maxHeight: "500px" }}
@@ -260,13 +296,10 @@ function Hero() {
             style={{ objectFit: "cover", objectPosition: "center" }}
             onError={handleHeroPhotoError}
           />
-          {/* Voile sombre en HAUT : lisibilité du logo TAPGOO */}
           <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-black/70 to-transparent" />
-          {/* Voile sombre en BAS : transition vers le bloc texte */}
           <div className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-neutral-950 to-transparent" />
         </div>
 
-        {/* Bloc texte sur fond sombre */}
         <div className="px-6 pb-14 pt-8">
           <h1 className="rise1 text-5xl font-black uppercase leading-none tracking-tight">
             La mobilité<br />
@@ -288,10 +321,33 @@ function Hero() {
               <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
             </button>
           </div>
+
+          {/* Formulaire de recherche rapide */}
+          <div className="rise3 mt-8 rounded-3xl bg-white p-4 shadow-2xl">
+            <div className="grid gap-3">
+              <input
+                type="text"
+                placeholder="Départ"
+                className="rounded-2xl border border-neutral-200 px-4 py-3 text-black outline-none focus:border-emerald-500"
+              />
+              <input
+                type="text"
+                placeholder="Destination"
+                className="rounded-2xl border border-neutral-200 px-4 py-3 text-black outline-none focus:border-emerald-500"
+              />
+              <input
+                type="date"
+                className="rounded-2xl border border-neutral-200 px-4 py-3 text-black outline-none focus:border-emerald-500"
+              />
+              <button className="rounded-2xl bg-emerald-500 px-6 py-3 font-bold text-white transition hover:bg-emerald-400">
+                Rechercher
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* ----- DESKTOP : full-bleed inchangé ----- */}
+      {/* ----- DESKTOP : full-bleed ----- */}
       <div className="relative hidden min-h-screen md:block">
         <div className="absolute inset-0 z-0">
           <div className="absolute inset-0 bg-gradient-to-br from-neutral-950 via-emerald-950 to-emerald-900" />
@@ -501,24 +557,6 @@ function Covoiturage() {
         </div>
       </div>
     </section>
-  );
-}
-
-function SearchMockup() {
-  return (
-    <div className="overflow-hidden rounded-3xl bg-white shadow-xl ring-1 ring-slate-100">
-      <div className="grid grid-cols-2 md:grid-cols-5">
-        <Cell label="Départ"      value="Paris" />
-        <Cell label="Destination" value="Lyon" />
-        <Cell label="Aller"       value="18 mai" />
-        <Cell label="Retour"      value="20 mai" />
-        <div className="col-span-2 flex items-center justify-center p-3 md:col-span-1">
-          <button className="flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700">
-            <Search className="h-4 w-4" /> Rechercher
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -884,8 +922,8 @@ function Contact() {
             </p>
 
             <div className="mt-10 space-y-4">
-              <ContactChannel icon={Mail}  label="Email"     value="hello@tapgoo.fr" />
-              <ContactChannel icon={Phone} label="Téléphone" value="+33 1 23 45 67 89" />
+              <ContactChannel icon={Mail}  label="Email"     value="contact@tapgoo.fr" />
+              <ContactChannel icon={Phone} label="Téléphone" value="+33767821752" />
             </div>
           </div>
 
@@ -999,7 +1037,7 @@ function FooterColumn({ title, links }) {
   );
 }
 
-/* IMAGE CARD — réutilisable pour Covoiturage / Recharge / Entreprises */
+/* IMAGE CARD */
 function ImageCard({ src, alt, label, title, dark, hideOverlay }) {
   return (
     <div
