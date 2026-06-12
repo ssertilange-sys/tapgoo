@@ -2,11 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Building2, Car, Loader2, Mail, MapPin, Phone, Save, UserRound } from "lucide-react";
+import { Loader2, Save, UserRound } from "lucide-react";
 import { getProfile, updateProfile } from "../../lib/api";
+
+const inputClass = "w-full rounded-2xl bg-[#f4f8f5] px-4 py-3.5 outline-none placeholder:text-[#5b6b62]";
 
 export default function ProfilPage() {
   const [loading, setLoading] = useState(true);
+  const [loggedOut, setLoggedOut] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -24,7 +27,6 @@ export default function ProfilPage() {
   async function load() {
     try {
       const profile = await getProfile();
-
       setForm({
         full_name: profile?.full_name || "",
         email: profile?.email || "",
@@ -36,21 +38,22 @@ export default function ProfilPage() {
         bio: profile?.bio || "",
       });
     } catch (e: any) {
-      setMessage(e.message || "Erreur de chargement du profil.");
+      if ((e.message || "").includes("non connecté")) setLoggedOut(true);
+      else setMessage("Erreur de chargement du profil.");
     } finally {
       setLoading(false);
     }
   }
 
-  async function saveProfile() {
+  async function saveProfile(e: React.FormEvent) {
+    e.preventDefault();
     setSaving(true);
     setMessage("");
-
     try {
       await updateProfile(form);
       setMessage("Profil enregistré.");
-    } catch (e: any) {
-      setMessage(e.message || "Erreur lors de l'enregistrement.");
+    } catch {
+      setMessage("Erreur lors de l'enregistrement.");
     } finally {
       setSaving(false);
     }
@@ -62,170 +65,101 @@ export default function ProfilPage() {
 
   if (loading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#fbfbf8]">
-        <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
+      <main className="flex min-h-[70vh] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-[#00b868]" />
+      </main>
+    );
+  }
+
+  if (loggedOut) {
+    return (
+      <main className="flex min-h-[70vh] items-center justify-center px-4">
+        <div className="max-w-md rounded-3xl bg-white p-8 text-center ring-1 ring-[#0c1f17]/5">
+          <UserRound className="mx-auto h-10 w-10 text-[#00b868]" />
+          <h1 className="font-display mt-4 text-2xl font-extrabold">Mon profil</h1>
+          <p className="mt-3 text-sm leading-6 text-[#5b6b62]">
+            Connectez-vous pour compléter votre profil : un profil renseigné
+            inspire confiance aux autres membres.
+          </p>
+          <Link href="/connexion" className="mt-6 inline-block rounded-full bg-[#00b868] px-6 py-3 text-sm font-bold text-white">
+            Se connecter
+          </Link>
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-[#fbfbf8] px-6 py-8 text-slate-950">
-      <div className="mx-auto max-w-6xl">
-        <header className="flex items-center justify-between">
-          <Link href="/" className="text-2xl font-black tracking-tight">
-            TAP<span className="text-emerald-600">GOO</span>
-          </Link>
+    <main className="mx-auto max-w-5xl px-4 py-8 md:px-8">
+      <h1 className="font-display text-3xl font-extrabold tracking-tight md:text-4xl">Mon profil</h1>
+      <p className="mt-2 text-sm text-[#5b6b62]">
+        Ces informations rassurent les membres avec qui vous partagez un trajet
+        ou une borne. Votre téléphone n'est jamais affiché publiquement.
+      </p>
 
-          <Link
-            href="/dashboard"
-            className="rounded-full bg-slate-950 px-5 py-3 text-sm font-black text-white"
-          >
-            Dashboard
-          </Link>
-        </header>
-
-        <section className="mt-10 grid gap-8 lg:grid-cols-[0.8fr_1.2fr]">
-          <aside className="rounded-[2rem] bg-white p-8 text-center shadow-sm ring-1 ring-slate-100">
-            <div className="mx-auto flex h-28 w-28 items-center justify-center overflow-hidden rounded-full bg-emerald-50">
-              {form.avatar_url ? (
-                <img src={form.avatar_url} alt="Avatar" className="h-full w-full object-cover" />
-              ) : (
-                <UserRound className="h-14 w-14 text-emerald-600" />
-              )}
-            </div>
-
-            <h1 className="mt-6 text-3xl font-black">
-              {form.full_name || "Utilisateur TAPGOO"}
-            </h1>
-
-            <p className="mt-2 text-sm font-bold text-slate-500">{form.email}</p>
-
-            <div className="mt-6 grid gap-3 text-left">
-              <Info icon={MapPin} label="Ville" value={form.city || "Non renseignée"} />
-              <Info icon={Car} label="Véhicule" value={form.vehicle || "Non renseigné"} />
-              <Info icon={Building2} label="Entreprise" value={form.company || "Non renseignée"} />
-            </div>
-          </aside>
-
-          <section className="rounded-[2rem] bg-white p-8 shadow-sm ring-1 ring-slate-100">
-            <p className="text-sm font-black uppercase tracking-widest text-emerald-700">
-              Profil utilisateur
-            </p>
-
-            <h2 className="mt-3 text-4xl font-black">Mes informations</h2>
-
-            <p className="mt-3 text-slate-600">
-              Ces informations serviront à renforcer la confiance entre conducteurs,
-              passagers et propriétaires de bornes.
-            </p>
-
-            {message && (
-              <div className="mt-6 rounded-2xl bg-emerald-50 px-5 py-4 font-bold text-emerald-700">
-                {message}
-              </div>
+      <div className="mt-7 grid gap-6 md:grid-cols-[0.7fr_1.3fr]">
+        <aside className="h-fit rounded-3xl bg-white p-7 text-center ring-1 ring-[#0c1f17]/5">
+          <div className="mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-full bg-[#00b868]/10">
+            {form.avatar_url ? (
+              <img src={form.avatar_url} alt="Votre avatar" className="h-full w-full object-cover" />
+            ) : (
+              <UserRound className="h-12 w-12 text-[#008f51]" />
             )}
+          </div>
+          <p className="font-display mt-4 text-xl font-extrabold">
+            {form.full_name || "Membre TAPGOO"}
+          </p>
+          <p className="mt-1 text-sm text-[#5b6b62]">{form.email}</p>
+          {form.city && <p className="mt-1 text-sm text-[#5b6b62]">{form.city}</p>}
+        </aside>
 
-            <div className="mt-8 grid gap-5">
-              <Input
-                label="Nom complet"
-                value={form.full_name}
-                onChange={(v: string) => setForm({ ...form, full_name: v })}
-              />
+        <form onSubmit={saveProfile} className="rounded-3xl bg-white p-7 ring-1 ring-[#0c1f17]/5">
+          <div className="grid gap-3 md:grid-cols-2">
+            <Field label="Nom complet">
+              <input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} maxLength={100} className={inputClass} />
+            </Field>
+            <Field label="Téléphone (privé)">
+              <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} maxLength={20} className={inputClass} />
+            </Field>
+            <Field label="Ville">
+              <input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} maxLength={100} className={inputClass} />
+            </Field>
+            <Field label="Véhicule">
+              <input value={form.vehicle} onChange={(e) => setForm({ ...form, vehicle: e.target.value })} maxLength={100} placeholder="ex : Renault Zoé" className={inputClass} />
+            </Field>
+            <Field label="Entreprise (optionnel)" full>
+              <input value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} maxLength={150} className={inputClass} />
+            </Field>
+            <Field label="À propos de vous" full>
+              <textarea value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} maxLength={500} rows={3} placeholder="Vos habitudes de trajet, musique ou silence, ponctualité…" className={inputClass + " resize-none"} />
+            </Field>
+          </div>
 
-              <Input
-                label="Email"
-                value={form.email}
-                disabled
-                icon={Mail}
-                onChange={() => {}}
-              />
+          {message && (
+            <p className="mt-4 rounded-2xl bg-[#00b868]/10 px-4 py-3 text-sm font-semibold text-[#008f51]" role="status">
+              {message}
+            </p>
+          )}
 
-              <Input
-                label="URL de la photo"
-                value={form.avatar_url}
-                onChange={(v: string) => setForm({ ...form, avatar_url: v })}
-              />
-
-              <Input
-                label="Téléphone"
-                value={form.phone}
-                icon={Phone}
-                onChange={(v: string) => setForm({ ...form, phone: v })}
-              />
-
-              <Input
-                label="Ville"
-                value={form.city}
-                icon={MapPin}
-                onChange={(v: string) => setForm({ ...form, city: v })}
-              />
-
-              <Input
-                label="Véhicule"
-                value={form.vehicle}
-                icon={Car}
-                onChange={(v: string) => setForm({ ...form, vehicle: v })}
-              />
-
-              <Input
-                label="Entreprise"
-                value={form.company}
-                icon={Building2}
-                onChange={(v: string) => setForm({ ...form, company: v })}
-              />
-
-              <label>
-                <span className="text-sm font-black text-slate-700">Bio</span>
-                <textarea
-                  rows={5}
-                  value={form.bio}
-                  onChange={(e) => setForm({ ...form, bio: e.target.value })}
-                  placeholder="Présentez-vous brièvement..."
-                  className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none focus:border-emerald-500"
-                />
-              </label>
-
-              <button
-                onClick={saveProfile}
-                disabled={saving}
-                className="inline-flex items-center justify-center gap-2 rounded-full bg-emerald-600 px-6 py-4 font-black text-white shadow-lg shadow-emerald-600/20"
-              >
-                <Save className="h-5 w-5" />
-                {saving ? "Enregistrement..." : "Enregistrer le profil"}
-              </button>
-            </div>
-          </section>
-        </section>
+          <button
+            disabled={saving}
+            className="mt-5 inline-flex items-center gap-2 rounded-full bg-[#00b868] px-6 py-3 text-sm font-bold text-white disabled:opacity-60"
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Enregistrer
+          </button>
+        </form>
       </div>
+
     </main>
   );
 }
 
-function Info({ icon: Icon, label, value }: any) {
+function Field({ label, full, children }: any) {
   return (
-    <div className="rounded-2xl bg-slate-50 p-4">
-      <div className="flex items-center gap-2 text-xs font-black uppercase text-slate-400">
-        <Icon className="h-4 w-4 text-emerald-600" />
-        {label}
-      </div>
-      <p className="mt-2 font-bold text-slate-800">{value}</p>
-    </div>
-  );
-}
-
-function Input({ label, value, onChange, icon: Icon, disabled = false }: any) {
-  return (
-    <label>
-      <span className="text-sm font-black text-slate-700">{label}</span>
-      <div className="mt-2 flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-        {Icon && <Icon className="h-5 w-5 text-emerald-600" />}
-        <input
-          value={value}
-          disabled={disabled}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full bg-transparent outline-none disabled:text-slate-500"
-        />
-      </div>
+    <label className={`block text-sm font-semibold ${full ? "md:col-span-2" : ""}`}>
+      {label}
+      <span className="mt-1.5 block font-normal">{children}</span>
     </label>
   );
 }

@@ -6,30 +6,38 @@ import {
   BatteryCharging,
   CalendarClock,
   Car,
+  Leaf,
   Loader2,
   LogOut,
-  Plus,
+  MapPin,
+  MessageCircle,
   Trash2,
   UserRound,
   X,
 } from "lucide-react";
-import { cancelBooking, deleteRide, getMyDashboard } from "../../lib/api";
+import { cancelBooking, deleteRide, getMyDashboard, startConversation } from "../../lib/api";
 import { signOutAndGoHome } from "../../lib/auth";
+import { useRouter } from "next/navigation";
+
+const KG_CO2_PER_KM = 0.1; // estimation prudente d'émissions évitées par passager transporté
+const DEFAULT_KM = 30; // distance moyenne supposée quand le trajet n'a pas de distance renseignée
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [dashboard, setDashboard] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [loggedOut, setLoggedOut] = useState(false);
   const [message, setMessage] = useState("");
 
   async function load() {
     setLoading(true);
     setMessage("");
-
     try {
       const data = await getMyDashboard();
       setDashboard(data);
     } catch (e: any) {
-      setMessage(e.message || "Erreur de chargement.");
+      if ((e.message || "").includes("non connecté")) setLoggedOut(true);
+      else setMessage("Erreur de chargement. Réessayez dans un instant.");
     } finally {
       setLoading(false);
     }
@@ -37,25 +45,32 @@ export default function DashboardPage() {
 
   async function handleDeleteRide(rideId: string) {
     setMessage("");
-
     try {
       await deleteRide(rideId);
       setMessage("Trajet supprimé.");
       await load();
-    } catch (e: any) {
-      setMessage(e.message || "Impossible de supprimer le trajet.");
+    } catch {
+      setMessage("Impossible de supprimer le trajet.");
     }
   }
 
   async function handleCancelBooking(bookingId: string) {
     setMessage("");
-
     try {
       await cancelBooking(bookingId);
       setMessage("Réservation annulée.");
       await load();
-    } catch (e: any) {
-      setMessage(e.message || "Impossible d'annuler la réservation.");
+    } catch {
+      setMessage("Impossible d'annuler la réservation.");
+    }
+  }
+
+  async function contactDriver(driverId: string, rideId: string) {
+    try {
+      const convId = await startConversation(driverId, rideId);
+      router.push(`/messages?c=${convId}`);
+    } catch {
+      setMessage("Impossible d'ouvrir la conversation.");
     }
   }
 
@@ -65,206 +80,224 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#fbfbf8]">
-        <Loader2 className="h-8 w-8 animate-spin text-emerald-600" />
+      <main className="flex min-h-[70vh] items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-[#00b868]" />
+      </main>
+    );
+  }
+
+  if (loggedOut) {
+    return (
+      <main className="flex min-h-[70vh] items-center justify-center px-4">
+        <div className="max-w-md rounded-3xl bg-white p-8 text-center ring-1 ring-[#0c1f17]/5">
+          <UserRound className="mx-auto h-10 w-10 text-[#00b868]" />
+          <h1 className="font-display mt-4 text-2xl font-extrabold">Mon espace</h1>
+          <p className="mt-3 text-sm leading-6 text-[#5b6b62]">
+            Connectez-vous pour retrouver vos trajets, réservations, bornes et votre impact.
+          </p>
+          <Link href="/connexion" className="mt-6 inline-block rounded-full bg-[#00b868] px-6 py-3 text-sm font-bold text-white">
+            Se connecter
+          </Link>
+        </div>
       </main>
     );
   }
 
   const profile = dashboard?.profile;
-  const myRides = dashboard?.myRides || [];
-  const myBookings = dashboard?.myBookings || [];
+  const myRides = (dashboard?.myRides || []).filter((r: any) => r.status !== "cancelled");
+  const myBookings = (dashboard?.myBookings || []).filter((b: any) => b.status !== "cancelled");
   const myStations = dashboard?.myStations || [];
 
+  const sharedTrips = myRides.length + myBookings.length;
+  const co2Kg = Math.round(
+    myRides.reduce((acc: number, r: any) => acc + (Number(r.distance_km) || DEFAULT_KM), 0) * KG_CO2_PER_KM +
+      myBookings.length * DEFAULT_KM * KG_CO2_PER_KM
+  );
+
   return (
-    <main className="min-h-screen bg-[#fbfbf8] px-6 py-8 text-slate-950">
-      <header className="mx-auto flex max-w-7xl items-center justify-between">
-        <Link href="/" className="text-2xl font-black tracking-tight">
-          TAP<span className="text-emerald-600">GOO</span>
-        </Link>
-
-        <button
-          onClick={signOutAndGoHome}
-          className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-black text-white"
-        >
-          <LogOut className="h-4 w-4" />
-          Déconnexion
-        </button>
-      </header>
-
-      <section className="mx-auto mt-10 max-w-7xl">
-        <div className="rounded-[2rem] bg-white p-8 shadow-sm ring-1 ring-emerald-100">
-          <p className="text-sm font-black uppercase tracking-widest text-emerald-700">
-            Dashboard
-          </p>
-
-          <h1 className="mt-4 text-5xl font-black tracking-tight">
-            Bonjour {profile?.full_name?.split(" ")[0] || "utilisateur"}
+    <main className="mx-auto max-w-7xl px-4 py-8 md:px-8">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h1 className="font-display text-3xl font-extrabold tracking-tight md:text-4xl">
+            Bonjour {profile?.full_name?.split(" ")[0] || ""}
           </h1>
-
-          <p className="mt-3 text-slate-600">
-            Gérez vos trajets, réservations et bornes.
+          <p className="mt-2 text-sm text-[#5b6b62]">
+            Vos trajets, réservations et bornes, au même endroit.
           </p>
-
-          <div className="mt-6 flex flex-wrap gap-3">
-            <QuickLink href="/covoiturage" label="Covoiturage" />
-            <QuickLink href="/bornes" label="Bornes" />
-            <QuickLink href="/profil" label="Profil" />
-            <QuickLink href="/messages" label="Messages" />
-          </div>
         </div>
-
-        {message && (
-          <div className="mt-6 rounded-2xl bg-emerald-50 px-5 py-4 font-bold text-emerald-700">
-            {message}
-          </div>
-        )}
-
-        <div className="mt-8 grid gap-5 md:grid-cols-4">
-          <Stat icon={UserRound} label="Profil" value="OK" />
-          <Stat icon={Car} label="Mes trajets" value={myRides.length} />
-          <Stat icon={Plus} label="Réservations" value={myBookings.length} />
-          <Stat icon={BatteryCharging} label="Bornes" value={myStations.length} />
+        <div className="flex gap-2">
+          <Link href="/profil" className="rounded-full bg-[#0c1f17]/5 px-5 py-2.5 text-sm font-bold">
+            Mon profil
+          </Link>
+          <button
+            onClick={signOutAndGoHome}
+            className="inline-flex items-center gap-2 rounded-full bg-[#0c1f17] px-5 py-2.5 text-sm font-bold text-white"
+          >
+            <LogOut className="h-4 w-4" />
+            Déconnexion
+          </button>
         </div>
+      </div>
 
-        <div className="mt-8 grid gap-8 lg:grid-cols-3">
-          <Panel title="Mes trajets" actionHref="/covoiturage">
-            {myRides.length === 0 ? (
-              <Empty text="Aucun trajet déposé." />
-            ) : (
-              myRides.map((ride: any) => (
-                <Card key={ride.id}>
-                  <p className="font-black">
-                    {ride.origin} → {ride.destination}
-                  </p>
+      {message && (
+        <p className="mt-5 rounded-2xl bg-[#00b868]/10 px-5 py-3.5 text-sm font-semibold text-[#008f51]" role="status">
+          {message}
+        </p>
+      )}
 
-                  <p className="mt-2 flex items-center gap-2 text-sm text-slate-600">
-                    <CalendarClock className="h-4 w-4 text-emerald-600" />
-                    {ride.departure_time
-                      ? new Date(ride.departure_time).toLocaleString("fr-FR")
-                      : "Date non précisée"}
-                  </p>
+      {/* Stats */}
+      <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat icon={Car} label="Trajets proposés" value={myRides.length} />
+        <Stat icon={CalendarClock} label="Réservations" value={myBookings.length} />
+        <Stat icon={BatteryCharging} label="Mes bornes" value={myStations.length} />
+        <div className="rounded-3xl bg-[#0c1f17] p-6 text-white">
+          <Leaf className="h-6 w-6 text-[#00b868]" />
+          <p className="font-display mt-4 text-3xl font-extrabold">{sharedTrips > 0 ? `≈ ${co2Kg} kg` : "—"}</p>
+          <p className="mt-1 text-xs font-semibold text-white/60">CO₂ évité (estimation)</p>
+        </div>
+      </div>
 
-                  <p className="mt-1 text-sm text-slate-600">
-                    Places restantes : {ride.seats_available}
-                  </p>
+      {/* Panneaux */}
+      <div className="mt-8 grid gap-5 lg:grid-cols-3">
+        <Panel title="Mes trajets" actionHref="/covoiturage" actionLabel="Proposer">
+          {myRides.length === 0 ? (
+            <Empty text="Aucun trajet en ligne." href="/covoiturage" cta="Proposer un trajet" />
+          ) : (
+            myRides.map((ride: any) => (
+              <Card key={ride.id}>
+                <RouteLine from={ride.origin} to={ride.destination} />
+                <p className="mt-2.5 flex items-center gap-1.5 text-sm text-[#5b6b62]">
+                  <CalendarClock className="h-4 w-4 text-[#00b868]" />
+                  {ride.departure_time
+                    ? new Date(ride.departure_time).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+                    : "Date non précisée"}
+                </p>
+                <p className="mt-1 text-sm text-[#5b6b62]">
+                  {ride.seats_available} place{ride.seats_available > 1 ? "s" : ""} restante{ride.seats_available > 1 ? "s" : ""}
+                </p>
+                <button
+                  onClick={() => handleDeleteRide(ride.id)}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-red-50 px-4 py-2 text-xs font-bold text-red-700"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Supprimer
+                </button>
+              </Card>
+            ))
+          )}
+        </Panel>
 
-                  <button
-                    onClick={() => handleDeleteRide(ride.id)}
-                    className="mt-4 inline-flex items-center gap-2 rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                    Supprimer
-                  </button>
-                </Card>
-              ))
-            )}
-          </Panel>
-
-          <Panel title="Mes réservations">
-            {myBookings.length === 0 ? (
-              <Empty text="Aucune réservation." />
-            ) : (
-              myBookings.map((booking: any) => (
-                <Card key={booking.id}>
-                  <p className="font-black">
-                    {booking.rides?.origin} → {booking.rides?.destination}
-                  </p>
-
-                  <p className="mt-2 text-sm text-slate-600">
-                    {booking.rides?.departure_time
-                      ? new Date(booking.rides.departure_time).toLocaleString(
-                          "fr-FR"
-                        )
-                      : "Date non précisée"}
-                  </p>
-
+        <Panel title="Mes réservations">
+          {myBookings.length === 0 ? (
+            <Empty text="Aucune réservation à venir." href="/covoiturage" cta="Trouver un trajet" />
+          ) : (
+            myBookings.map((booking: any) => (
+              <Card key={booking.id}>
+                <RouteLine from={booking.rides?.origin} to={booking.rides?.destination} />
+                <p className="mt-2.5 flex items-center gap-1.5 text-sm text-[#5b6b62]">
+                  <CalendarClock className="h-4 w-4 text-[#00b868]" />
+                  {booking.rides?.departure_time
+                    ? new Date(booking.rides.departure_time).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+                    : "Date non précisée"}
+                </p>
+                <div className="mt-3 flex gap-2">
+                  {booking.rides?.driver_id && (
+                    <button
+                      onClick={() => contactDriver(booking.rides.driver_id, booking.rides.id)}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-[#0c1f17]/5 px-4 py-2 text-xs font-bold"
+                    >
+                      <MessageCircle className="h-3.5 w-3.5" />
+                      Contacter
+                    </button>
+                  )}
                   <button
                     onClick={() => handleCancelBooking(booking.id)}
-                    className="mt-4 inline-flex items-center gap-2 rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-700"
+                    className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-4 py-2 text-xs font-bold text-red-700"
                   >
-                    <X className="h-4 w-4" />
+                    <X className="h-3.5 w-3.5" />
                     Annuler
                   </button>
-                </Card>
-              ))
-            )}
-          </Panel>
+                </div>
+              </Card>
+            ))
+          )}
+        </Panel>
 
-          <Panel title="Mes bornes" actionHref="/bornes">
-            {myStations.length === 0 ? (
-              <Empty text="Aucune borne déposée." />
-            ) : (
-              myStations.map((station: any) => (
-                <Card key={station.id}>
-                  <p className="font-black">{station.name}</p>
-                  <p className="mt-1 text-sm text-slate-600">{station.address}</p>
-                  <p className="mt-1 text-sm text-slate-600">{station.city}</p>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Puissance : {station.power_kw || "—"} kW
-                  </p>
-                  <p className="mt-1 text-sm text-slate-600">
-                    Prix :{" "}
-                    {station.price_cents_per_kwh
-                      ? `${(station.price_cents_per_kwh / 100).toFixed(2)} €/kWh`
-                      : "—"}
-                  </p>
-                </Card>
-              ))
-            )}
-          </Panel>
-        </div>
-      </section>
+        <Panel title="Mes bornes" actionHref="/bornes" actionLabel="Ajouter">
+          {myStations.length === 0 ? (
+            <Empty text="Aucune borne partagée." href="/bornes" cta="Partager ma borne" />
+          ) : (
+            myStations.map((station: any) => (
+              <Card key={station.id}>
+                <p className="font-display font-extrabold">{station.name}</p>
+                <p className="mt-1 flex items-center gap-1.5 text-sm text-[#5b6b62]">
+                  <MapPin className="h-4 w-4 text-[#00b868]" />
+                  {station.city || station.address}
+                </p>
+                <p className="mt-1 text-sm text-[#5b6b62]">
+                  {station.power_kw ? `${station.power_kw} kW` : "Puissance non renseignée"}
+                  {station.price_cents_per_kwh
+                    ? ` · ${(station.price_cents_per_kwh / 100).toFixed(2)} €/kWh`
+                    : ""}
+                </p>
+              </Card>
+            ))
+          )}
+        </Panel>
+      </div>
     </main>
+  );
+}
+
+function RouteLine({ from, to }: { from?: string; to?: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="h-2 w-2 shrink-0 rounded-full bg-[#00b868]" />
+      <span className="font-display truncate text-sm font-extrabold">{from}</span>
+      <span className="trip-dash min-w-4 flex-1" aria-hidden="true" />
+      <MapPin className="h-3.5 w-3.5 shrink-0 text-[#00b868]" />
+      <span className="font-display truncate text-sm font-extrabold">{to}</span>
+    </div>
   );
 }
 
 function Stat({ icon: Icon, label, value }: any) {
   return (
-    <div className="rounded-[1.7rem] bg-white p-6 shadow-sm ring-1 ring-emerald-100">
-      <Icon className="h-6 w-6 text-emerald-600" />
-      <p className="mt-4 text-3xl font-black">{value}</p>
-      <p className="text-xs font-black uppercase text-slate-500">{label}</p>
+    <div className="rounded-3xl bg-white p-6 ring-1 ring-[#0c1f17]/5">
+      <Icon className="h-6 w-6 text-[#00b868]" />
+      <p className="font-display mt-4 text-3xl font-extrabold">{value}</p>
+      <p className="mt-1 text-xs font-semibold text-[#5b6b62]">{label}</p>
     </div>
   );
 }
 
-function QuickLink({ href, label }: any) {
+function Panel({ title, actionHref, actionLabel, children }: any) {
   return (
-    <Link
-      href={href}
-      className="rounded-full bg-slate-50 px-4 py-2 text-sm font-black text-slate-700 ring-1 ring-slate-200"
-    >
-      {label}
-    </Link>
-  );
-}
-
-function Panel({ title, actionHref, children }: any) {
-  return (
-    <section className="rounded-[2rem] bg-white p-6 shadow-sm ring-1 ring-slate-100">
-      <div className="flex items-center justify-between gap-4">
-        <h2 className="text-2xl font-black">{title}</h2>
-
+    <section className="rounded-3xl bg-white p-5 ring-1 ring-[#0c1f17]/5">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="font-display text-lg font-extrabold">{title}</h2>
         {actionHref && (
-          <Link
-            href={actionHref}
-            className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-black text-white"
-          >
-            Ajouter
+          <Link href={actionHref} className="rounded-full bg-[#00b868] px-4 py-1.5 text-xs font-bold text-white">
+            {actionLabel}
           </Link>
         )}
       </div>
-
-      <div className="mt-6 space-y-4">{children}</div>
+      <div className="mt-4 space-y-3">{children}</div>
     </section>
   );
 }
 
 function Card({ children }: any) {
-  return <div className="rounded-2xl border bg-slate-50 p-5">{children}</div>;
+  return <div className="rounded-2xl bg-[#f4f8f5] p-4">{children}</div>;
 }
 
-function Empty({ text }: any) {
-  return <p className="text-slate-500">{text}</p>;
+function Empty({ text, href, cta }: any) {
+  return (
+    <div className="rounded-2xl bg-[#f4f8f5] p-5 text-center">
+      <p className="text-sm text-[#5b6b62]">{text}</p>
+      <Link href={href} className="mt-3 inline-block text-sm font-bold text-[#008f51]">
+        {cta} →
+      </Link>
+    </div>
+  );
 }

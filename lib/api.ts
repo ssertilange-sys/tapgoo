@@ -98,6 +98,7 @@ export async function updateProfile(payload: any) {
       phone: payload.phone?.trim() || null,
       city: payload.city?.trim() || null,
       vehicle: payload.vehicle?.trim() || null,
+      company: payload.company?.trim() || null,
       bio: payload.bio?.trim() || null,
     })
     .eq("id", user.id)
@@ -106,4 +107,51 @@ export async function updateProfile(payload: any) {
 
   if (error) throw error;
   return data;
+}
+/* ---------- Messagerie ---------- */
+export async function startConversation(otherUserId: string, rideId?: string | null) {
+  const user = await getCurrentUserOrThrow();
+  await ensureProfile(user);
+  const { data, error } = await supabase.rpc("start_conversation", {
+    p_other_user: otherUserId,
+    p_ride_id: rideId ?? null,
+  });
+  if (error) throw error;
+  return data as string; // conversation id
+}
+
+export async function listConversations() {
+  await getCurrentUserOrThrow();
+  const { data, error } = await supabase.rpc("list_conversations");
+  if (error) throw error;
+  return (data || []) as Array<{
+    conversation_id: string;
+    other_name: string | null;
+    other_avatar: string | null;
+    last_body: string | null;
+    last_at: string | null;
+  }>;
+}
+
+export async function getMessages(conversationId: string) {
+  const user = await getCurrentUserOrThrow();
+  const { data, error } = await supabase
+    .from("messages")
+    .select("id,sender_id,body,created_at")
+    .eq("conversation_id", conversationId)
+    .order("created_at", { ascending: true })
+    .limit(200);
+  if (error) throw error;
+  return { messages: data || [], myId: user.id };
+}
+
+export async function sendMessage(conversationId: string, body: string) {
+  const user = await getCurrentUserOrThrow();
+  const text = body.trim();
+  if (!text) throw new Error("Message vide.");
+  if (text.length > 2000) throw new Error("Message trop long (2000 caractères max).");
+  const { error } = await supabase
+    .from("messages")
+    .insert({ conversation_id: conversationId, sender_id: user.id, body: text });
+  if (error) throw error;
 }
