@@ -9,12 +9,21 @@ export async function ensureProfile(user: any) {
 }
 export async function searchTrips(filters: { depart?: string; arrivee?: string; date?: string } = {}) {
   const depart = filters.depart?.trim() || ""; const arrivee = filters.arrivee?.trim() || ""; const date = filters.date || "";
-  let query = supabase.from("rides").select(`id,driver_id,origin,destination,departure_time,seats_total,seats_available,price_cents,vehicle_info,status,profiles:driver_id(full_name,avatar_url)`).eq("status", "active").gt("seats_available", 0).order("departure_time", { ascending: true });
+  let query = supabase.from("rides").select(`id,driver_id,origin,destination,departure_time,seats_total,seats_available,price_cents,vehicle_info,status`).eq("status", "active").gt("seats_available", 0).order("departure_time", { ascending: true });
   if (depart) query = query.ilike("origin", `%${depart}%`); if (arrivee) query = query.ilike("destination", `%${arrivee}%`);
   if (date) { const start = new Date(`${date}T00:00:00`); const end = new Date(`${date}T23:59:59`); query = query.gte("departure_time", start.toISOString()).lte("departure_time", end.toISOString()); }
   else query = query.gte("departure_time", new Date().toISOString());
   const { data, error } = await query; if (error) throw error;
-  return (data || []).map((ride: any) => ({ ...ride, driver_name: ride.profiles?.full_name || "Conducteur TAPGOO", driver_avatar_url: ride.profiles?.avatar_url || null }));
+  const rides = data || [];
+  // Infos conducteur lues via la vue public_profiles (n'expose jamais téléphone/email).
+  const driverIds = Array.from(new Set(rides.map((r: any) => r.driver_id).filter(Boolean)));
+  let profilesById: Record<string, any> = {};
+  if (driverIds.length) {
+    const { data: profs, error: pErr } = await supabase.from("public_profiles").select("id,full_name,avatar_url").in("id", driverIds);
+    if (pErr) throw pErr;
+    profilesById = Object.fromEntries((profs || []).map((p: any) => [p.id, p]));
+  }
+  return rides.map((ride: any) => ({ ...ride, driver_name: profilesById[ride.driver_id]?.full_name || "Conducteur TAPGOO", driver_avatar_url: profilesById[ride.driver_id]?.avatar_url || null }));
 }
 export async function createRide(payload: any) {
   const user = await getCurrentUserOrThrow(); await ensureProfile(user);

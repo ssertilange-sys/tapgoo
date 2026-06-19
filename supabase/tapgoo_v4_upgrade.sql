@@ -24,23 +24,20 @@ drop policy if exists charging_stations_select_anon on public.charging_stations;
 create policy charging_stations_select_anon on public.charging_stations
   for select to anon using (status = 'available');
 
--- 3b. Les membres connectés peuvent voir le nom/avatar des autres membres
---     (nécessaire pour afficher le conducteur d'un trajet).
---     Le téléphone et l'email restent protégés : on passe par une VUE
---     limitée plutôt que d'ouvrir la table profiles.
+-- 3b. Les membres ne peuvent lire QUE leur propre profil complet
+--     (policy profiles_select_own du schéma de base). Les informations
+--     publiques nécessaires pour afficher un conducteur (nom, avatar, ville)
+--     passent EXCLUSIVEMENT par la vue public_profiles ci-dessous, qui
+--     n'expose jamais le téléphone ni l'email.
 create or replace view public.public_profiles
   with (security_invoker = off) as
   select id, full_name, avatar_url, city from public.profiles;
 grant select on public.public_profiles to authenticated, anon;
 
--- La recherche de trajets joint profiles : on autorise une lecture
--- restreinte des profils aux utilisateurs connectés uniquement.
+-- Sécurité : on supprime toute policy permissive qui exposerait l'intégralité
+-- de la table profiles (téléphone, email) aux autres membres connectés.
+-- La lecture des profils tiers se fait uniquement via la vue public_profiles.
 drop policy if exists profiles_select_public_fields on public.profiles;
-create policy profiles_select_public_fields on public.profiles
-  for select to authenticated using (true);
--- NB : la policy profiles_select_own existante reste en place ;
--- les champs sensibles (téléphone) ne sont jamais affichés côté client
--- pour les autres membres.
 
 -- 4) Suppression de trajet et annulation de réservation (RPC sécurisées)
 create or replace function public.delete_my_ride(p_ride_id uuid, p_driver_id uuid)

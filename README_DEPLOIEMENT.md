@@ -1,11 +1,18 @@
 # TAPGOO v4 — Guide de mise en ligne
 
 ## 1. Base de données (obligatoire)
-Dans Supabase → SQL Editor, exécuter le fichier :
-`supabase/tapgoo_v4_upgrade.sql`
-(Il est idempotent : relançable sans danger. Il ajoute la messagerie, les
-colonnes profil manquantes, la lecture publique des trajets actifs, et les
-fonctions sécurisées.)
+Dans Supabase → SQL Editor, exécuter les **deux** scripts **dans cet ordre** :
+
+1. `supabase/tapgoo_schema.sql` — schéma de base (tables, RLS, fonctions).
+   **À lancer en premier** : il crée les tables sur lesquelles s'appuie la
+   mise à niveau. Sans lui, l'étape 2 échoue (tables absentes).
+2. `supabase/tapgoo_v4_upgrade.sql` — mise à niveau v4. À lancer **après** le
+   schéma de base. Il ajoute la messagerie, les colonnes profil manquantes, la
+   lecture publique des trajets actifs et les fonctions sécurisées.
+
+Les deux scripts sont idempotents (relançables sans danger). Sur une base déjà
+en service, relancer `tapgoo_schema.sql` applique aussi le correctif de sécurité
+de la fonction `book_ride` (réservation impossible au nom d'un autre membre).
 
 ## 2. Variables d'environnement (Vercel → Settings → Environment Variables)
 - NEXT_PUBLIC_SUPABASE_URL
