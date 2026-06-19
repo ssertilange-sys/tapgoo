@@ -53,44 +53,36 @@ export async function createStation(payload: any) {
 }
 export async function cancelBooking(bookingId: string) {
   const user = await getCurrentUserOrThrow();
-
   const { data, error } = await supabase.rpc("cancel_ride_booking", {
     p_booking_id: bookingId,
     p_passenger_id: user.id,
   });
-
   if (error) throw error;
-
   return data;
 }
 export async function deleteRide(rideId: string) {
   const user = await getCurrentUserOrThrow();
-
   const { data, error } = await supabase.rpc("delete_my_ride", {
     p_ride_id: rideId,
     p_driver_id: user.id,
   });
-
   if (error) throw error;
   return data;
 }
 export async function getProfile() {
   const user = await getCurrentUserOrThrow();
   await ensureProfile(user);
-
   const { data, error } = await supabase
     .from("profiles")
     .select("*")
     .eq("id", user.id)
     .maybeSingle();
-
   if (error) throw error;
   return data;
 }
 
 export async function updateProfile(payload: any) {
   const user = await getCurrentUserOrThrow();
-
   const { data, error } = await supabase
     .from("profiles")
     .update({
@@ -104,10 +96,36 @@ export async function updateProfile(payload: any) {
     .eq("id", user.id)
     .select("*")
     .single();
-
   if (error) throw error;
   return data;
 }
+
+/* ---------- Photo de profil ---------- */
+export async function uploadAvatar(file: File) {
+  const user = await getCurrentUserOrThrow();
+  if (!file.type.startsWith("image/")) throw new Error("Le fichier doit être une image.");
+  if (file.size > 5 * 1024 * 1024) throw new Error("Image trop lourde (5 Mo maximum).");
+
+  const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "") || "jpg";
+  const path = `${user.id}/avatar.${ext}`;
+
+  const { error: upErr } = await supabase.storage
+    .from("avatars")
+    .upload(path, file, { upsert: true, contentType: file.type });
+  if (upErr) throw upErr;
+
+  const { data: pub } = supabase.storage.from("avatars").getPublicUrl(path);
+  const url = `${pub.publicUrl}?v=${Date.now()}`;
+
+  const { error: updErr } = await supabase
+    .from("profiles")
+    .update({ avatar_url: url })
+    .eq("id", user.id);
+  if (updErr) throw updErr;
+
+  return url;
+}
+
 /* ---------- Messagerie ---------- */
 export async function startConversation(otherUserId: string, rideId?: string | null) {
   const user = await getCurrentUserOrThrow();
@@ -117,7 +135,7 @@ export async function startConversation(otherUserId: string, rideId?: string | n
     p_ride_id: rideId ?? null,
   });
   if (error) throw error;
-  return data as string; // conversation id
+  return data as string;
 }
 
 export async function listConversations() {
