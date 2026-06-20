@@ -105,13 +105,14 @@ create policy conversations_select_member on public.conversations
   );
 
 drop policy if exists conversation_members_select_own on public.conversation_members;
-create policy conversation_members_select_own on public.conversation_members
-  for select to authenticated using (
-    user_id = auth.uid()
-    or exists (select 1 from public.conversation_members m2
-               where m2.conversation_id = conversation_members.conversation_id
-                 and m2.user_id = auth.uid())
-  );
+
+create policy conversation_members_select_own
+on public.conversation_members
+for select
+to authenticated
+using (
+  user_id = auth.uid()
+);
 
 drop policy if exists messages_select_member on public.messages;
 create policy messages_select_member on public.messages
