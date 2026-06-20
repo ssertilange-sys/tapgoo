@@ -1,0 +1,64 @@
+digraph TAPGOO_OS {
+  graph [rankdir=LR, splines=spline, nodesep=0.5, ranksep=1.0, bgcolor="white", fontname="Helvetica", label="TAPGOO OS — Schéma cible MVP (cœur : covoiturage · bornes · parking)\nmobility_resources = pivot des 3 briques · réservations multi-passagers natives", labelloc="t", fontsize=18];
+  node [shape=record, fontname="Helvetica", fontsize=10, style="filled", fillcolor="#f4f8f5", color="#0c1f17"];
+  edge [color="#5b6b62", arrowhead=crow, arrowtail=none, fontname="Helvetica", fontsize=8];
+
+  // ---- Identité ----
+  authusers   [label="{auth.users|id (PK)\lemail\lidentities (Google)\l}", fillcolor="#e8eef9"];
+  profiles    [label="{profiles|id (PK→auth.users)\ldisplay_name\lavatar_url\laccount_type\ltrust_score\l}", fillcolor="#e8f9ef"];
+  priv        [label="{user_private_profiles|user_id (PK→profiles)\lphone\llegal_*, address_*\l}"];
+  vehicles    [label="{user_vehicles|id (PK)\luser_id →profiles\lseats, energy\l}"];
+
+  // ---- Pivot ressources ----
+  resources   [label="{mobility_resources  (PIVOT)|id (PK)\lowner_user_id →profiles\lorganization_id →orgs\lresource_type (enum)\lvisibility, location(geo)\lsuggested_price_cents\l}", fillcolor="#00b868", fontcolor="white"];
+
+  // ---- Covoiturage (multi-passagers) ----
+  rides       [label="{rides|id (PK)\lresource_id →resources (1:1)\ldriver_id →profiles\lorigin/destination_label (+geo)\lseats_total, seats_available ◀ restantes\lstatus (published…)\l}", fillcolor="#e8f9ef"];
+  ridebk      [label="{ride_bookings  (MULTI-PASSAGERS)|id (PK)\lride_id →rides\lpassenger_id →profiles\lseats (1..8) ◀ places/résa\lstatus: pending→accepted→completed\lUNIQUE(ride_id,passenger_id)\l}", fillcolor="#fff3d6"];
+
+  // ---- Bornes ----
+  charge      [label="{charging_stations|id (PK)\lresource_id →resources (1:1)\lconnector_type, power_kw\l}"];
+  chargebk    [label="{charging_bookings|id (PK)\lstation_id →charging_stations\luser_id →profiles\lstarts_at/ends_at (anti-chevauchement)\l}", fillcolor="#fff3d6"];
+
+  // ---- Parking (brique cœur) ----
+  parking     [label="{parking_spots|id (PK)\lresource_id →resources (1:1)\lspot_type, max_height_cm\l}"];
+  parkingbk   [label="{parking_bookings|id (PK)\lparking_spot_id →parking_spots\luser_id →profiles\lstarts_at/ends_at (anti-chevauchement)\l}", fillcolor="#fff3d6"];
+
+  // ---- Organisations ----
+  orgs        [label="{organizations|id (PK)\lorg_type, name, siret\lowner_user_id →profiles\l}", fillcolor="#e8eef9"];
+  orgmem      [label="{organization_members|id (PK)\lorganization_id →orgs\luser_id →profiles\lrole (RBAC)\l}", fillcolor="#e8eef9"];
+
+  // ---- Messagerie (reprise 1:1) ----
+  conv        [label="{conversations|id (PK)\lride_id →rides (contexte)\l}"];
+  convmem     [label="{conversation_members|conversation_id →conv\luser_id →profiles\l}"];
+  msg         [label="{messages|id (PK)\lconversation_id →conv\lsender_id →profiles\lbody\l}"];
+
+  // ---- Contact (réintroduit) ----
+  contact     [label="{contact_messages  (réintroduit)|id (PK)\lnom, email, entreprise\lmessage\l}", fillcolor="#f0e8f9"];
+
+  // Relations
+  authusers -> profiles [label="1:1"];
+  profiles -> priv [label="1:1"];
+  profiles -> vehicles;
+  profiles -> resources [label="owner"];
+  orgs -> resources [label="owner"];
+  orgs -> orgmem;
+  profiles -> orgmem;
+
+  resources -> rides [label="1:1", arrowhead=none];
+  resources -> charge [label="1:1", arrowhead=none];
+  resources -> parking [label="1:1", arrowhead=none];
+
+  rides -> ridebk;
+  profiles -> ridebk [label="passenger"];
+  charge -> chargebk;
+  profiles -> chargebk;
+  parking -> parkingbk;
+  profiles -> parkingbk;
+
+  rides -> conv [label="contexte", style=dashed];
+  conv -> convmem;
+  conv -> msg;
+  profiles -> convmem;
+  profiles -> msg [label="sender"];
+}
