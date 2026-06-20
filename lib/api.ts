@@ -4,8 +4,23 @@ export async function getCurrentUser() { const { data, error } = await supabase.
 export async function getCurrentUserOrThrow() { const user = await getCurrentUser(); if (!user) throw new Error("Utilisateur non connecté."); return user; }
 export async function ensureProfile(user: any) {
   if (!user?.id) throw new Error("Utilisateur non connecté.");
-  const { data, error } = await supabase.from("profiles").upsert({ id: user.id, email: user.email ?? null, full_name: user.user_metadata?.full_name ?? user.email ?? "Utilisateur TAPGOO", avatar_url: user.user_metadata?.avatar_url ?? null }, { onConflict: "id" }).select().single();
-  if (error) throw error; return data;
+  // Schéma OS : le trigger handle_new_user crée déjà le profil à l'inscription.
+  // Filet de sécurité idempotent — garantit l'existence du profil sans écraser
+  // un display_name déjà personnalisé (ignoreDuplicates). Pas de colonnes
+  // email/full_name en OS : l'email vit dans auth.users, le nom = display_name.
+  const { error } = await supabase.from("profiles").upsert(
+    {
+      id: user.id,
+      display_name:
+        user.user_metadata?.full_name ??
+        user.user_metadata?.name ??
+        user.email?.split("@")[0] ??
+        "Membre TAPGOO",
+      avatar_url: user.user_metadata?.avatar_url ?? null,
+    },
+    { onConflict: "id", ignoreDuplicates: true }
+  );
+  if (error) throw error;
 }
 export async function searchTrips(filters: { depart?: string; arrivee?: string; date?: string } = {}) {
   const depart = filters.depart?.trim() || ""; const arrivee = filters.arrivee?.trim() || ""; const date = filters.date || "";
