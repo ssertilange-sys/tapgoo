@@ -15,16 +15,6 @@ begin
   return new;
 end; $$;
 
--- Vrai si l'appelant est admin plateforme et non suspendu.
--- SECURITY DEFINER : contourne la RLS pour éviter toute récursion dans les policies.
-create or replace function public.is_platform_admin()
-returns boolean language sql stable security definer set search_path = public as $$
-  select exists(
-    select 1 from public.profiles p
-    where p.id = auth.uid() and p.account_type = 'platform_admin' and not p.is_suspended
-  );
-$$;
-
 -- ------------------------------------------------------------
 -- Profil PUBLIC (jamais de téléphone ni d'identité légale ici)
 -- ------------------------------------------------------------
@@ -43,6 +33,17 @@ create table if not exists public.profiles (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Vrai si l'appelant est admin plateforme et non suspendu.
+-- SECURITY DEFINER : contourne la RLS pour éviter toute récursion dans les policies.
+-- Défini après profiles (une fonction SQL est validée à la création).
+create or replace function public.is_platform_admin()
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists(
+    select 1 from public.profiles p
+    where p.id = auth.uid() and p.account_type = 'platform_admin' and not p.is_suspended
+  );
+$$;
 
 -- Profil PRIVÉ : accessible au seul propriétaire (+ admin plateforme).
 create table if not exists public.user_private_profiles (
