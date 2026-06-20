@@ -14,29 +14,27 @@ export default function ProfilPage() {
   const [message, setMessage] = useState("");
 
   const [form, setForm] = useState({
-    full_name: "",
+    display_name: "",
     email: "",
     avatar_url: "",
+    default_city: "",
     phone: "",
-    city: "",
     vehicle: "",
-    company: "",
-    bio: "",
   });
+  const [organizations, setOrganizations] = useState<Array<{ name: string; role: string }>>([]);
 
   async function load() {
     try {
       const profile = await getProfile();
       setForm({
-        full_name: profile?.full_name || "",
-        email: profile?.email || "",
-        avatar_url: profile?.avatar_url || "",
-        phone: profile?.phone || "",
-        city: profile?.city || "",
-        vehicle: profile?.vehicle || "",
-        company: profile?.company || "",
-        bio: profile?.bio || "",
+        display_name: profile.display_name || "",
+        email: profile.email || "",
+        avatar_url: profile.avatar_url || "",
+        default_city: profile.default_city || "",
+        phone: profile.phone || "",
+        vehicle: profile.vehicle || "",
       });
+      setOrganizations(profile.organizations || []);
     } catch (e: any) {
       if ((e.message || "").includes("non connecté")) setLoggedOut(true);
       else setMessage("Erreur de chargement du profil.");
@@ -107,31 +105,40 @@ export default function ProfilPage() {
             )}
           </div>
           <p className="font-display mt-4 text-xl font-extrabold">
-            {form.full_name || "Membre TAPGOO"}
+            {form.display_name || "Membre TAPGOO"}
           </p>
           <p className="mt-1 text-sm text-[#5b6b62]">{form.email}</p>
-          {form.city && <p className="mt-1 text-sm text-[#5b6b62]">{form.city}</p>}
+          {form.default_city && <p className="mt-1 text-sm text-[#5b6b62]">{form.default_city}</p>}
+          {organizations.length > 0 && (
+            <div className="mt-4 border-t border-[#0c1f17]/5 pt-4 text-left">
+              <p className="text-xs font-bold uppercase tracking-wide text-[#5b6b62]">Entreprises</p>
+              <ul className="mt-2 space-y-1">
+                {organizations.map((o, i) => (
+                  <li key={i} className="text-sm text-[#0c1f17]">
+                    {o.name} <span className="text-[#5b6b62]">· {o.role}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </aside>
 
         <form onSubmit={saveProfile} className="rounded-3xl bg-white p-7 ring-1 ring-[#0c1f17]/5">
           <div className="grid gap-3 md:grid-cols-2">
             <Field label="Nom complet">
-              <input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} maxLength={100} className={inputClass} />
+              <input value={form.display_name} onChange={(e) => setForm({ ...form, display_name: e.target.value })} maxLength={100} className={inputClass} />
+            </Field>
+            <Field label="Email">
+              <input value={form.email} readOnly disabled className={inputClass + " opacity-70"} />
             </Field>
             <Field label="Téléphone (privé)">
               <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} maxLength={20} className={inputClass} />
             </Field>
             <Field label="Ville">
-              <input value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} maxLength={100} className={inputClass} />
+              <input value={form.default_city} onChange={(e) => setForm({ ...form, default_city: e.target.value })} maxLength={100} className={inputClass} />
             </Field>
-            <Field label="Véhicule">
+            <Field label="Véhicule" full>
               <input value={form.vehicle} onChange={(e) => setForm({ ...form, vehicle: e.target.value })} maxLength={100} placeholder="ex : Renault Zoé" className={inputClass} />
-            </Field>
-            <Field label="Entreprise (optionnel)" full>
-              <input value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} maxLength={150} className={inputClass} />
-            </Field>
-            <Field label="À propos de vous" full>
-              <textarea value={form.bio} onChange={(e) => setForm({ ...form, bio: e.target.value })} maxLength={500} rows={3} placeholder="Vos habitudes de trajet, musique ou silence, ponctualité…" className={inputClass + " resize-none"} />
             </Field>
           </div>
 

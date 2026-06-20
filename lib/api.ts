@@ -93,35 +93,72 @@ export async function deleteRide(rideId: string) {
   if (error) throw error;
   return data;
 }
+// Schéma OS : le profil est éclaté sur plusieurs tables. getProfile recompose
+// une vue unique pour le front. L'email vient de auth.users (non dupliqué).
 export async function getProfile() {
   const user = await getCurrentUserOrThrow();
   await ensureProfile(user);
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .maybeSingle();
-  if (error) throw error;
-  return data;
+
+  const [profRes, privRes, vehRes, orgsRes] = await Promise.all([
+    supabase.from("profiles").select("display_name,avatar_url,default_city").eq("id", user.id).maybeSingle(),
+    supabase.from("user_private_profiles").select("phone").eq("user_id", user.id).maybeSingle(),
+    supabase.from("user_vehicles").select("label").eq("user_id", user.id).eq("is_default", true).maybeSingle(),
+    supabase.from("organization_members").select("role,organizations(name)").eq("user_id", user.id),
+  ]);
+  if (profRes.error) throw profRes.error;
+  if (privRes.error) throw privRes.error;
+  if (vehRes.error) throw vehRes.error;
+  if (orgsRes.error) throw orgsRes.error;
+
+  return {
+    display_name: profRes.data?.display_name || "",
+    email: user.email || "",
+    avatar_url: profRes.data?.avatar_url || "",
+    default_city: profRes.data?.default_city || "",
+    phone: privRes.data?.phone || "",
+    vehicle: vehRes.data?.label || "",
+    organizations: (orgsRes.data || []).map((m: any) => ({
+      name: m.organizations?.name || "",
+      role: m.role,
+    })),
+  };
 }
 
+// Écrit chaque champ vers sa table OS : public (profiles), privé
+// (user_private_profiles), véhicule (user_vehicles). L'appartenance entreprise
+// (organizations) se gère dans l'espace entreprise, pas ici.
 export async function updateProfile(payload: any) {
   const user = await getCurrentUserOrThrow();
-  const { data, error } = await supabase
-    .from("profiles")
-    .update({
-      full_name: payload.full_name?.trim() || null,
-      phone: payload.phone?.trim() || null,
-      city: payload.city?.trim() || null,
-      vehicle: payload.vehicle?.trim() || null,
-      company: payload.company?.trim() || null,
-      bio: payload.bio?.trim() || null,
-    })
-    .eq("id", user.id)
-    .select("*")
-    .single();
-  if (error) throw error;
-  return data;
+  await ensureProfile(user);
+
+  // Champs PUBLICS. display_name est NOT NULL : on ne l'écrase pas avec du vide.
+  const pub: any = { default_city: payload.default_city?.trim() || null };
+  const name = payload.display_name?.trim();
+  if (name) pub.display_name = name;
+  const { error: e1 } = await supabase.from("profiles").update(pub).eq("id", user.id);
+  if (e1) throw e1;
+
+  // Champ PRIVÉ (téléphone) → user_private_profiles.
+  const { error: e2 } = await supabase
+    .from("user_private_profiles")
+    .upsert({ user_id: user.id, phone: payload.phone?.trim() || null }, { onConflict: "user_id" });
+  if (e2) throw e2;
+
+  // Véhicule par défaut → user_vehicles (update si présent, sinon insert).
+  const vlabel = payload.vehicle?.trim();
+  if (vlabel) {
+    const { data: veh } = await supabase
+      .from("user_vehicles").select("id").eq("user_id", user.id).eq("is_default", true).maybeSingle();
+    if (veh) {
+      const { error } = await supabase.from("user_vehicles").update({ label: vlabel }).eq("id", veh.id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from("user_vehicles").insert({ user_id: user.id, label: vlabel, is_default: true });
+      if (error) throw error;
+    }
+  }
+
+  return getProfile();
 }
 
 /* ---------- Photo de profil ---------- */
