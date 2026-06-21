@@ -158,6 +158,40 @@ export async function bookChargingSlot(stationId: string, startsAt: string, ends
   });
   if (error) throw error; return data;
 }
+
+/* ---------- Parking / garage (brique cœur) ---------- */
+export async function searchParking(city = "") {
+  let query = supabase.from("parking_spots").select("id,title,address,spot_type,max_height_cm,suggested_price_cents_per_hour,is_active").eq("is_active", true).order("created_at", { ascending: false });
+  if (city.trim()) query = query.ilike("address", `%${city.trim()}%`);
+  const { data, error } = await query; if (error) throw error;
+  return (data || []).map((s: any) => ({
+    id: s.id, title: s.title, city: null, address: s.address,
+    spot_type: s.spot_type, max_height_cm: s.max_height_cm,
+    price_cents_per_hour: s.suggested_price_cents_per_hour, status: "available",
+  }));
+}
+export async function createParking(payload: any) {
+  const user = await getCurrentUserOrThrow(); await ensureProfile(user);
+  if (!payload.title?.trim() || !payload.address?.trim()) throw new Error("Intitulé et adresse sont obligatoires.");
+  const address = [payload.address?.trim(), payload.city?.trim()].filter(Boolean).join(", ");
+  // Publication via RPC create_parking_spot (ressource + place transactionnelles).
+  const { data, error } = await supabase.rpc("create_parking_spot", {
+    p_title: payload.title.trim(),
+    p_address: address,
+    p_spot_type: payload.spot_type?.trim() || "standard",
+    p_max_height_cm: payload.max_height_cm ? Number(payload.max_height_cm) : null,
+    p_price_cents_per_hour: payload.price_cents_per_hour ?? 0,
+  });
+  if (error) throw error; return data;
+}
+// Réserve un créneau de parking (anti-chevauchement par trigger DB).
+export async function bookParkingSlot(spotId: string, startsAt: string, endsAt: string) {
+  await getCurrentUserOrThrow();
+  const { data, error } = await supabase.rpc("book_parking_slot", {
+    p_spot_id: spotId, p_starts_at: startsAt, p_ends_at: endsAt,
+  });
+  if (error) throw error; return data;
+}
 export async function cancelBooking(bookingId: string) {
   await getCurrentUserOrThrow();
   // OS : cancel_my_booking (restitue les sièges si la résa était acceptée).

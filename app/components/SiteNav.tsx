@@ -9,6 +9,7 @@ import {
   Car,
   Home,
   MessageCircle,
+  SquareParking,
   UserRound,
 } from "lucide-react";
 import { supabase } from "../../lib/supabaseClient";
@@ -17,8 +18,9 @@ const tabs = [
   { href: "/", label: "Accueil", icon: Home },
   { href: "/covoiturage", label: "Covoiturage", icon: Car },
   { href: "/bornes", label: "Bornes", icon: BatteryCharging },
+  { href: "/parking", label: "Parking", icon: SquareParking },
   { href: "/messages", label: "Messages", icon: MessageCircle },
-  { href: "/dashboard", label: "Mon espace", icon: UserRound },
+  { href: "/dashboard", label: "Espace", icon: UserRound },
 ];
 
 export default function SiteNav() {
@@ -47,6 +49,7 @@ export default function SiteNav() {
           <nav className="hidden items-center gap-1 md:flex" aria-label="Navigation principale">
             <TopLink href="/covoiturage" active={pathname.startsWith("/covoiturage")}>Covoiturage</TopLink>
             <TopLink href="/bornes" active={pathname.startsWith("/bornes")}>Bornes</TopLink>
+            <TopLink href="/parking" active={pathname.startsWith("/parking")}>Parking</TopLink>
             <TopLink href="/entreprises" active={pathname.startsWith("/entreprises")}>Entreprises</TopLink>
             <TopLink href="/messages" active={pathname.startsWith("/messages")}>Messages</TopLink>
           </nav>
@@ -84,7 +87,7 @@ export default function SiteNav() {
         className="fixed inset-x-0 bottom-0 z-40 border-t border-[#0c1f17]/10 bg-white/95 backdrop-blur md:hidden"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
-        <div className="grid grid-cols-5">
+        <div className="grid grid-cols-6">
           {tabs.map(({ href, label, icon: Icon }) => {
             const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
             return (
