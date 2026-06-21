@@ -152,6 +152,9 @@ export default function DashboardPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Link href="/entreprise" className="rounded-full bg-[#0c1f17]/5 px-5 py-2.5 text-sm font-bold">
+            Espace entreprise
+          </Link>
           <Link href="/profil" className="rounded-full bg-[#0c1f17]/5 px-5 py-2.5 text-sm font-bold">
             Mon profil
           </Link>

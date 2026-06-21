@@ -349,3 +349,96 @@ export async function sendMessage(conversationId: string, body: string) {
     .insert({ conversation_id: conversationId, sender_id: user.id, body: text });
   if (error) throw error;
 }
+
+/* ---------- Espace entreprise ---------- */
+// Crée une organisation et rattache le créateur comme 'owner' (RPC transactionnel).
+export async function createOrganization(payload: { name: string; org_type?: string; siret?: string; billing_email?: string }) {
+  await getCurrentUserOrThrow();
+  const { data, error } = await supabase.rpc("create_organization", {
+    p_name: payload.name?.trim(),
+    p_org_type: payload.org_type || "company",
+    p_siret: payload.siret?.trim() || null,
+    p_billing_email: payload.billing_email?.trim() || null,
+  });
+  if (error) throw error;
+  return data as string; // id de l'organisation
+}
+
+// Liste les organisations de l'utilisateur courant + son rôle.
+export async function getMyOrganizations() {
+  await getCurrentUserOrThrow();
+  const { data, error } = await supabase
+    .from("organization_members")
+    .select("role,organizations(id,name,org_type,verified)")
+    .eq("status", "active");
+  if (error) throw error;
+  return (data || [])
+    .filter((m: any) => m.organizations)
+    .map((m: any) => ({ id: m.organizations.id, name: m.organizations.name, org_type: m.organizations.org_type, verified: m.organizations.verified, role: m.role }));
+}
+
+// Détail complet d'une organisation : org, membres (+ noms), invitations en
+// attente, sites, et tableau de bord agrégé (vue v_organization_mobility_dashboard).
+export async function getOrganization(orgId: string) {
+  await getCurrentUserOrThrow();
+  const [orgRes, membersRes, invRes, sitesRes, dashRes] = await Promise.all([
+    supabase.from("organizations").select("id,name,org_type,siret,verified,owner_user_id").eq("id", orgId).maybeSingle(),
+    supabase.from("organization_members").select("id,user_id,role,job_title,status").eq("organization_id", orgId),
+    supabase.from("organization_invitations").select("id,email,role,expires_at").is("accepted_at", null).eq("organization_id", orgId),
+    supabase.from("organization_sites").select("id,name,city").eq("organization_id", orgId),
+    supabase.from("v_organization_mobility_dashboard").select("*").eq("organization_id", orgId).maybeSingle(),
+  ]);
+  if (orgRes.error) throw orgRes.error;
+  if (membersRes.error) throw membersRes.error;
+  if (sitesRes.error) throw sitesRes.error;
+  if (dashRes.error) throw dashRes.error;
+
+  const members = membersRes.data || [];
+  const ids = Array.from(new Set(members.map((m: any) => m.user_id)));
+  let names: Record<string, string> = {};
+  if (ids.length) {
+    const { data: profs } = await supabase.from("public_profiles").select("id,display_name").in("id", ids);
+    names = Object.fromEntries((profs || []).map((p: any) => [p.id, p.display_name]));
+  }
+  return {
+    org: orgRes.data,
+    members: members.map((m: any) => ({ ...m, name: names[m.user_id] || "Membre TAPGOO" })),
+    invitations: invRes.data || [], // vide si l'appelant n'est pas owner/admin (RLS)
+    sites: sitesRes.data || [],
+    dashboard: dashRes.data || null,
+  };
+}
+
+// Invite un membre (owner/admin). Renvoie le token de l'invitation (à transmettre).
+export async function inviteMember(orgId: string, email: string, role: string = "member") {
+  const user = await getCurrentUserOrThrow();
+  const { data, error } = await supabase
+    .from("organization_invitations")
+    .insert({ organization_id: orgId, email: email.trim().toLowerCase(), role, created_by: user.id })
+    .select("token")
+    .single();
+  if (error) throw error;
+  return data?.token as string;
+}
+
+// Rejoindre une organisation via un token d'invitation (email vérifié côté DB).
+export async function acceptInvitation(token: string) {
+  await getCurrentUserOrThrow();
+  const { data, error } = await supabase.rpc("accept_organization_invitation", { p_token: token.trim() });
+  if (error) throw error;
+  return data as string;
+}
+
+// Change le rôle d'un membre (owner/admin via RLS).
+export async function updateMemberRole(memberId: string, role: string) {
+  await getCurrentUserOrThrow();
+  const { error } = await supabase.from("organization_members").update({ role }).eq("id", memberId);
+  if (error) throw error;
+}
+
+// Retire un membre de l'organisation (owner/admin via RLS).
+export async function removeMember(memberId: string) {
+  await getCurrentUserOrThrow();
+  const { error } = await supabase.from("organization_members").delete().eq("id", memberId);
+  if (error) throw error;
+}
