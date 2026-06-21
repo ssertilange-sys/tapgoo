@@ -22,30 +22,52 @@ export async function ensureProfile(user: any) {
   );
   if (error) throw error;
 }
+// Schéma OS : rides utilise origin_label/destination_label/suggested_price_cents
+// et statut 'published'. On renvoie une forme v4 (origin/destination/price_cents)
+// pour garder la page covoiturage inchangée. Conducteur via public_profiles.
 export async function searchTrips(filters: { depart?: string; arrivee?: string; date?: string } = {}) {
   const depart = filters.depart?.trim() || ""; const arrivee = filters.arrivee?.trim() || ""; const date = filters.date || "";
-  let query = supabase.from("rides").select(`id,driver_id,origin,destination,departure_time,seats_total,seats_available,price_cents,vehicle_info,status`).eq("status", "active").gt("seats_available", 0).order("departure_time", { ascending: true });
-  if (depart) query = query.ilike("origin", `%${depart}%`); if (arrivee) query = query.ilike("destination", `%${arrivee}%`);
+  let query = supabase.from("rides").select(`id,driver_id,origin_label,destination_label,departure_time,seats_total,seats_available,suggested_price_cents,vehicle_info,status`).eq("status", "published").gt("seats_available", 0).order("departure_time", { ascending: true });
+  if (depart) query = query.ilike("origin_label", `%${depart}%`); if (arrivee) query = query.ilike("destination_label", `%${arrivee}%`);
   if (date) { const start = new Date(`${date}T00:00:00`); const end = new Date(`${date}T23:59:59`); query = query.gte("departure_time", start.toISOString()).lte("departure_time", end.toISOString()); }
   else query = query.gte("departure_time", new Date().toISOString());
   const { data, error } = await query; if (error) throw error;
   const rides = data || [];
-  // Infos conducteur lues via la vue public_profiles (n'expose jamais téléphone/email).
   const driverIds = Array.from(new Set(rides.map((r: any) => r.driver_id).filter(Boolean)));
   let profilesById: Record<string, any> = {};
   if (driverIds.length) {
-    const { data: profs, error: pErr } = await supabase.from("public_profiles").select("id,full_name,avatar_url").in("id", driverIds);
+    const { data: profs, error: pErr } = await supabase.from("public_profiles").select("id,display_name,avatar_url").in("id", driverIds);
     if (pErr) throw pErr;
     profilesById = Object.fromEntries((profs || []).map((p: any) => [p.id, p]));
   }
-  return rides.map((ride: any) => ({ ...ride, driver_name: profilesById[ride.driver_id]?.full_name || "Conducteur TAPGOO", driver_avatar_url: profilesById[ride.driver_id]?.avatar_url || null }));
+  return rides.map((ride: any) => ({
+    id: ride.id,
+    driver_id: ride.driver_id,
+    origin: ride.origin_label,
+    destination: ride.destination_label,
+    departure_time: ride.departure_time,
+    seats_total: ride.seats_total,
+    seats_available: ride.seats_available,
+    price_cents: ride.suggested_price_cents,
+    vehicle_info: ride.vehicle_info,
+    driver_name: profilesById[ride.driver_id]?.display_name || "Conducteur TAPGOO",
+    driver_avatar_url: profilesById[ride.driver_id]?.avatar_url || null,
+  }));
 }
 export async function createRide(payload: any) {
   const user = await getCurrentUserOrThrow(); await ensureProfile(user);
   const seats = Math.max(1, Number(payload.seats_available || 1)); const departure = new Date(payload.departure_time);
   if (!payload.origin?.trim() || !payload.destination?.trim() || !payload.departure_time) throw new Error("Départ, arrivée et date sont obligatoires.");
   if (Number.isNaN(departure.getTime())) throw new Error("Date de départ invalide.");
-  const { data, error } = await supabase.from("rides").insert({ driver_id: user.id, origin: payload.origin.trim(), destination: payload.destination.trim(), departure_time: departure.toISOString(), seats_total: seats, seats_available: seats, price_cents: payload.price_cents ?? null, vehicle_info: payload.vehicle_info || null, status: "active" }).select().single();
+  // Publication via RPC create_ride (ressource + trajet en une transaction).
+  const { data, error } = await supabase.rpc("create_ride", {
+    p_origin_label: payload.origin.trim(),
+    p_destination_label: payload.destination.trim(),
+    p_departure_time: departure.toISOString(),
+    p_seats_total: seats,
+    p_price_cents: payload.price_cents ?? 0,
+    p_vehicle_info: payload.vehicle_info || null,
+  });
   if (error) throw error; return data;
 }
 export async function bookTrip(rideId: string) {
@@ -86,12 +108,13 @@ export async function cancelBooking(bookingId: string) {
 }
 export async function deleteRide(rideId: string) {
   const user = await getCurrentUserOrThrow();
-  const { data, error } = await supabase.rpc("delete_my_ride", {
-    p_ride_id: rideId,
-    p_driver_id: user.id,
-  });
+  // OS : pas de delete_my_ride ; on passe le trajet en 'cancelled' (RLS : conducteur).
+  const { error } = await supabase
+    .from("rides")
+    .update({ status: "cancelled" })
+    .eq("id", rideId)
+    .eq("driver_id", user.id);
   if (error) throw error;
-  return data;
 }
 // Schéma OS : le profil est éclaté sur plusieurs tables. getProfile recompose
 // une vue unique pour le front. L'email vient de auth.users (non dupliqué).
