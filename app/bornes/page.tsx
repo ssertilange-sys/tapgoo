@@ -12,7 +12,8 @@ import {
   ShieldCheck,
   Zap,
 } from "lucide-react";
-import { createStation, getCurrentUser, searchStations } from "../../lib/api";
+import { bookChargingSlot, createStation, getCurrentUser, searchStations } from "../../lib/api";
+import SlotBooking from "../components/SlotBooking";
 
 export default function BornesPage() {
   return (
@@ -232,6 +233,15 @@ function BornesInner() {
                     <span className="text-sm text-[#5b6b62]">Tarif sur demande</span>
                   )}
                 </p>
+                <SlotBooking
+                  onBook={async (start, end) => {
+                    if (!user) {
+                      router.push("/connexion");
+                      return;
+                    }
+                    await bookChargingSlot(s.id, start, end);
+                  }}
+                />
               </article>
             ))}
           </div>

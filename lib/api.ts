@@ -123,15 +123,39 @@ export async function getMyDashboard() {
     myRides, myBookings, myStations, incomingRequests,
   };
 }
+// OS : charging_stations utilise connector_type/suggested_price_cents_per_kwh/
+// is_active. On renvoie une forme v4 (plug_type/price_cents_per_kwh) pour garder
+// la page bornes inchangée. Pas de colonne city → repliée dans address.
 export async function searchStations(city = "") {
-  let query = supabase.from("charging_stations").select("*").eq("status", "available").order("created_at", { ascending: false });
-  if (city.trim()) query = query.ilike("city", `%${city.trim()}%`);
-  const { data, error } = await query; if (error) throw error; return data || [];
+  let query = supabase.from("charging_stations").select("id,name,address,connector_type,power_kw,suggested_price_cents_per_kwh,is_active").eq("is_active", true).order("created_at", { ascending: false });
+  if (city.trim()) query = query.ilike("address", `%${city.trim()}%`);
+  const { data, error } = await query; if (error) throw error;
+  return (data || []).map((s: any) => ({
+    id: s.id, name: s.name, city: null, address: s.address,
+    power_kw: s.power_kw, plug_type: s.connector_type,
+    price_cents_per_kwh: s.suggested_price_cents_per_kwh, status: "available",
+  }));
 }
 export async function createStation(payload: any) {
   const user = await getCurrentUserOrThrow(); await ensureProfile(user);
   if (!payload.name?.trim() || !payload.address?.trim()) throw new Error("Nom et adresse sont obligatoires.");
-  const { data, error } = await supabase.from("charging_stations").insert({ owner_id: user.id, name: payload.name.trim(), address: payload.address.trim(), city: payload.city?.trim() || null, power_kw: payload.power_kw ? Number(payload.power_kw) : null, plug_type: payload.plug_type?.trim() || null, price_cents_per_kwh: payload.price_cents_per_kwh ?? null, status: "available", description: payload.description || null }).select().single();
+  const address = [payload.address?.trim(), payload.city?.trim()].filter(Boolean).join(", ");
+  // Publication via RPC create_charging_station (ressource + borne transactionnelles).
+  const { data, error } = await supabase.rpc("create_charging_station", {
+    p_name: payload.name.trim(),
+    p_address: address,
+    p_connector_type: payload.plug_type?.trim() || null,
+    p_power_kw: payload.power_kw ? Number(payload.power_kw) : null,
+    p_price_cents_per_kwh: payload.price_cents_per_kwh ?? 0,
+  });
+  if (error) throw error; return data;
+}
+// Réserve un créneau de borne (l'anti-chevauchement est appliqué par trigger DB).
+export async function bookChargingSlot(stationId: string, startsAt: string, endsAt: string, vehicleLabel?: string) {
+  await getCurrentUserOrThrow();
+  const { data, error } = await supabase.rpc("book_charging_slot", {
+    p_station_id: stationId, p_starts_at: startsAt, p_ends_at: endsAt, p_vehicle_label: vehicleLabel || null,
+  });
   if (error) throw error; return data;
 }
 export async function cancelBooking(bookingId: string) {
