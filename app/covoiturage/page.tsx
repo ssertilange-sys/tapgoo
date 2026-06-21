@@ -47,6 +47,7 @@ function CovoiturageInner() {
     arrivee: params.get("arrivee") || "",
     date: params.get("date") || "",
   });
+  const [seatsById, setSeatsById] = useState<Record<string, number>>({});
 
   const [ride, setRide] = useState({
     origin: "",
@@ -94,22 +95,22 @@ function CovoiturageInner() {
     }
   }
 
-  async function reserve(id: string) {
+  async function reserve(id: string, seats: number) {
     if (!user) {
       router.push("/connexion");
       return;
     }
     setMessage("");
     try {
-      await bookTrip(id);
-      setMessage("Réservation confirmée. Retrouvez-la dans Mon espace.");
+      await bookTrip(id, seats);
+      setMessage("Demande envoyée. En attente de la validation du conducteur.");
       await loadTrips();
     } catch (e: any) {
       const msg = e.message || "";
-      if (msg.includes("déjà réservé") || msg.includes("duplicate key")) {
-        setMessage("Vous avez déjà réservé ce trajet.");
+      if (msg.includes("déjà") || msg.includes("duplicate key")) {
+        setMessage("Vous avez déjà une demande sur ce trajet.");
       } else if (msg.includes("place")) {
-        setMessage("Ce trajet n'a plus de place disponible.");
+        setMessage("Ce trajet n'a plus assez de places disponibles.");
       } else if (msg.includes("propre trajet")) {
         setMessage("Vous ne pouvez pas réserver votre propre trajet.");
       } else {
@@ -308,8 +309,20 @@ function CovoiturageInner() {
                 </div>
 
                 <div className="mt-4 flex gap-2">
+                  <select
+                    value={seatsById[trip.id] || 1}
+                    onChange={(e) => setSeatsById({ ...seatsById, [trip.id]: Number(e.target.value) })}
+                    aria-label="Nombre de places"
+                    className="rounded-full bg-[#f4f8f5] px-3 py-2.5 text-sm font-bold outline-none"
+                  >
+                    {Array.from({ length: Math.max(1, trip.seats_available) }, (_, i) => i + 1).map((n) => (
+                      <option key={n} value={n}>
+                        {n} place{n > 1 ? "s" : ""}
+                      </option>
+                    ))}
+                  </select>
                   <button
-                    onClick={() => reserve(trip.id)}
+                    onClick={() => reserve(trip.id, seatsById[trip.id] || 1)}
                     className="flex-1 rounded-full bg-[#00b868] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#008f51]"
                   >
                     Réserver

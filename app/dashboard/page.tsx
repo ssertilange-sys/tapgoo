@@ -6,6 +6,7 @@ import {
   BatteryCharging,
   CalendarClock,
   Car,
+  Check,
   Leaf,
   Loader2,
   LogOut,
@@ -15,12 +16,23 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import { cancelBooking, deleteRide, getMyDashboard, startConversation } from "../../lib/api";
+import { cancelBooking, deleteRide, getMyDashboard, respondToBooking, startConversation } from "../../lib/api";
 import { signOutAndGoHome } from "../../lib/auth";
 import { useRouter } from "next/navigation";
 
-const KG_CO2_PER_KM = 0.1; // estimation prudente d'émissions évitées par passager transporté
-const DEFAULT_KM = 30; // distance moyenne supposée quand le trajet n'a pas de distance renseignée
+const KG_CO2_PER_KM = 0.1;
+const DEFAULT_KM = 30;
+
+const STATUS_LABEL: Record<string, string> = {
+  pending: "En attente",
+  accepted: "Acceptée",
+  completed: "Terminée",
+  rejected: "Refusée",
+  cancelled: "Annulée",
+  no_show: "Absent",
+  disputed: "Litige",
+  expired: "Expirée",
+};
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -62,6 +74,19 @@ export default function DashboardPage() {
       await load();
     } catch {
       setMessage("Impossible d'annuler la réservation.");
+    }
+  }
+
+  async function handleRespond(bookingId: string, accept: boolean) {
+    setMessage("");
+    try {
+      await respondToBooking(bookingId, accept);
+      setMessage(accept ? "Demande acceptée." : "Demande refusée.");
+      await load();
+    } catch (e: any) {
+      const msg = e.message || "";
+      if (msg.includes("places")) setMessage("Plus assez de places disponibles.");
+      else setMessage("Action impossible pour le moment.");
     }
   }
 
@@ -107,6 +132,7 @@ export default function DashboardPage() {
   const myRides = (dashboard?.myRides || []).filter((r: any) => r.status !== "cancelled");
   const myBookings = (dashboard?.myBookings || []).filter((b: any) => b.status !== "cancelled");
   const myStations = dashboard?.myStations || [];
+  const incomingRequests = dashboard?.incomingRequests || [];
 
   const sharedTrips = myRides.length + myBookings.length;
   const co2Kg = Math.round(
@@ -145,7 +171,6 @@ export default function DashboardPage() {
         </p>
       )}
 
-      {/* Stats */}
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat icon={Car} label="Trajets proposés" value={myRides.length} />
         <Stat icon={CalendarClock} label="Réservations" value={myBookings.length} />
@@ -157,33 +182,63 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Panneaux */}
       <div className="mt-8 grid gap-5 lg:grid-cols-3">
         <Panel title="Mes trajets" actionHref="/covoiturage" actionLabel="Proposer">
           {myRides.length === 0 ? (
             <Empty text="Aucun trajet en ligne." href="/covoiturage" cta="Proposer un trajet" />
           ) : (
-            myRides.map((ride: any) => (
-              <Card key={ride.id}>
-                <RouteLine from={ride.origin} to={ride.destination} />
-                <p className="mt-2.5 flex items-center gap-1.5 text-sm text-[#5b6b62]">
-                  <CalendarClock className="h-4 w-4 text-[#00b868]" />
-                  {ride.departure_time
-                    ? new Date(ride.departure_time).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
-                    : "Date non précisée"}
-                </p>
-                <p className="mt-1 text-sm text-[#5b6b62]">
-                  {ride.seats_available} place{ride.seats_available > 1 ? "s" : ""} restante{ride.seats_available > 1 ? "s" : ""}
-                </p>
-                <button
-                  onClick={() => handleDeleteRide(ride.id)}
-                  className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-red-50 px-4 py-2 text-xs font-bold text-red-700"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Supprimer
-                </button>
-              </Card>
-            ))
+            myRides.map((ride: any) => {
+              const requests = incomingRequests.filter((r: any) => r.ride_id === ride.id);
+              return (
+                <Card key={ride.id}>
+                  <RouteLine from={ride.origin} to={ride.destination} />
+                  <p className="mt-2.5 flex items-center gap-1.5 text-sm text-[#5b6b62]">
+                    <CalendarClock className="h-4 w-4 text-[#00b868]" />
+                    {ride.departure_time
+                      ? new Date(ride.departure_time).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+                      : "Date non précisée"}
+                  </p>
+                  <p className="mt-1 text-sm text-[#5b6b62]">
+                    {ride.seats_available} place{ride.seats_available > 1 ? "s" : ""} restante{ride.seats_available > 1 ? "s" : ""}
+                  </p>
+
+                  {requests.length > 0 && (
+                    <div className="mt-3 space-y-2 rounded-2xl bg-white p-3 ring-1 ring-[#00b868]/30">
+                      <p className="text-xs font-bold text-[#008f51]">Demandes reçues</p>
+                      {requests.map((req: any) => (
+                        <div key={req.id} className="flex items-center justify-between gap-2">
+                          <span className="truncate text-sm">
+                            {req.passenger_name} · {req.seats} place{req.seats > 1 ? "s" : ""}
+                          </span>
+                          <span className="flex shrink-0 gap-1">
+                            <button
+                              onClick={() => handleRespond(req.id, true)}
+                              className="inline-flex items-center gap-1 rounded-full bg-[#00b868] px-3 py-1.5 text-xs font-bold text-white"
+                            >
+                              <Check className="h-3.5 w-3.5" /> Accepter
+                            </button>
+                            <button
+                              onClick={() => handleRespond(req.id, false)}
+                              className="inline-flex items-center gap-1 rounded-full bg-[#0c1f17]/5 px-3 py-1.5 text-xs font-bold"
+                            >
+                              <X className="h-3.5 w-3.5" /> Refuser
+                            </button>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => handleDeleteRide(ride.id)}
+                    className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-red-50 px-4 py-2 text-xs font-bold text-red-700"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Supprimer
+                  </button>
+                </Card>
+              );
+            })
           )}
         </Panel>
 
@@ -193,12 +248,18 @@ export default function DashboardPage() {
           ) : (
             myBookings.map((booking: any) => (
               <Card key={booking.id}>
-                <RouteLine from={booking.rides?.origin} to={booking.rides?.destination} />
+                <div className="flex items-center justify-between gap-2">
+                  <RouteLine from={booking.rides?.origin} to={booking.rides?.destination} />
+                  <span className="shrink-0 rounded-full bg-[#00b868]/10 px-2.5 py-1 text-[11px] font-bold text-[#008f51]">
+                    {STATUS_LABEL[booking.status] || booking.status}
+                  </span>
+                </div>
                 <p className="mt-2.5 flex items-center gap-1.5 text-sm text-[#5b6b62]">
                   <CalendarClock className="h-4 w-4 text-[#00b868]" />
                   {booking.rides?.departure_time
                     ? new Date(booking.rides.departure_time).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
                     : "Date non précisée"}
+                  {booking.seats > 1 ? ` · ${booking.seats} places` : ""}
                 </p>
                 <div className="mt-3 flex gap-2">
                   {booking.rides?.driver_id && (
@@ -210,13 +271,15 @@ export default function DashboardPage() {
                       Contacter
                     </button>
                   )}
-                  <button
-                    onClick={() => handleCancelBooking(booking.id)}
-                    className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-4 py-2 text-xs font-bold text-red-700"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                    Annuler
-                  </button>
+                  {booking.status !== "completed" && (
+                    <button
+                      onClick={() => handleCancelBooking(booking.id)}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-red-50 px-4 py-2 text-xs font-bold text-red-700"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      Annuler
+                    </button>
+                  )}
                 </div>
               </Card>
             ))

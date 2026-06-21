@@ -70,21 +70,58 @@ export async function createRide(payload: any) {
   });
   if (error) throw error; return data;
 }
-export async function bookTrip(rideId: string) {
+export async function bookTrip(rideId: string, seats: number = 1) {
   const user = await getCurrentUserOrThrow(); await ensureProfile(user);
-  const { data, error } = await supabase.rpc("book_ride", { p_ride_id: rideId, p_passenger_id: user.id });
+  // OS : book_ride crée une demande 'pending' de N places (le conducteur valide).
+  const { data, error } = await supabase.rpc("book_ride", { p_ride_id: rideId, p_seats: Math.max(1, Number(seats) || 1) });
   if (error) throw error; return data;
+}
+// Conducteur : accepte (décrément des sièges, anti-surbooking) ou refuse une demande.
+export async function respondToBooking(bookingId: string, accept: boolean) {
+  await getCurrentUserOrThrow();
+  const { error } = await supabase.rpc("respond_to_booking", { p_booking_id: bookingId, p_accept: accept });
+  if (error) throw error;
+}
+// Validation mutuelle d'un trajet effectué (→ completed + éligibilité FMD).
+export async function validateBooking(bookingId: string) {
+  await getCurrentUserOrThrow();
+  const { error } = await supabase.rpc("validate_ride_booking", { p_booking_id: bookingId });
+  if (error) throw error;
 }
 export async function getMyDashboard() {
   const user = await getCurrentUserOrThrow(); await ensureProfile(user);
   const [profileRes, ridesRes, bookingsRes, stationsRes] = await Promise.all([
-    supabase.from("profiles").select("*").eq("id", user.id).maybeSingle(),
-    supabase.from("rides").select("*").eq("driver_id", user.id).order("departure_time", { ascending: false }),
-    supabase.from("ride_bookings").select(`*,rides(id,origin,destination,departure_time,price_cents,driver_id)`).eq("passenger_id", user.id).order("created_at", { ascending: false }),
-    supabase.from("charging_stations").select("*").eq("owner_id", user.id).order("created_at", { ascending: false }),
+    supabase.from("profiles").select("display_name,avatar_url").eq("id", user.id).maybeSingle(),
+    supabase.from("rides").select("id,origin_label,destination_label,departure_time,seats_available,status").eq("driver_id", user.id).order("departure_time", { ascending: false }),
+    supabase.from("ride_bookings").select(`id,status,seats,ride_id,rides(id,origin_label,destination_label,departure_time,suggested_price_cents,driver_id)`).eq("passenger_id", user.id).order("created_at", { ascending: false }),
+    supabase.from("charging_stations").select("id,name,address,power_kw,suggested_price_cents_per_kwh").eq("owner_user_id", user.id).order("created_at", { ascending: false }),
   ]);
   if (profileRes.error) throw profileRes.error; if (ridesRes.error) throw ridesRes.error; if (bookingsRes.error) throw bookingsRes.error; if (stationsRes.error) throw stationsRes.error;
-  return { profile: profileRes.data, myRides: ridesRes.data || [], myBookings: bookingsRes.data || [], myStations: stationsRes.data || [] };
+
+  const myRides = (ridesRes.data || []).map((r: any) => ({ id: r.id, origin: r.origin_label, destination: r.destination_label, departure_time: r.departure_time, seats_available: r.seats_available, status: r.status }));
+  const myBookings = (bookingsRes.data || []).map((b: any) => ({ id: b.id, status: b.status, seats: b.seats, rides: b.rides ? { id: b.rides.id, origin: b.rides.origin_label, destination: b.rides.destination_label, departure_time: b.rides.departure_time, price_cents: b.rides.suggested_price_cents, driver_id: b.rides.driver_id } : null }));
+  const myStations = (stationsRes.data || []).map((s: any) => ({ id: s.id, name: s.name, city: null, address: s.address, power_kw: s.power_kw, price_cents_per_kwh: s.suggested_price_cents_per_kwh }));
+
+  // Demandes 'pending' reçues sur mes trajets (pour acceptation/refus).
+  const myRideIds = myRides.map((r: any) => r.id);
+  let incomingRequests: any[] = [];
+  if (myRideIds.length) {
+    const { data: reqs, error: reqErr } = await supabase.from("ride_bookings").select("id,seats,passenger_id,ride_id").in("ride_id", myRideIds).eq("status", "pending");
+    if (reqErr) throw reqErr;
+    const passengerIds = Array.from(new Set((reqs || []).map((r: any) => r.passenger_id)));
+    let names: Record<string, string> = {};
+    if (passengerIds.length) {
+      const { data: profs } = await supabase.from("public_profiles").select("id,display_name").in("id", passengerIds);
+      names = Object.fromEntries((profs || []).map((p: any) => [p.id, p.display_name]));
+    }
+    const rideById: Record<string, any> = Object.fromEntries(myRides.map((r: any) => [r.id, r]));
+    incomingRequests = (reqs || []).map((r: any) => ({ id: r.id, ride_id: r.ride_id, seats: r.seats, passenger_name: names[r.passenger_id] || "Passager TAPGOO", origin: rideById[r.ride_id]?.origin, destination: rideById[r.ride_id]?.destination }));
+  }
+
+  return {
+    profile: profileRes.data ? { full_name: profileRes.data.display_name, avatar_url: profileRes.data.avatar_url } : null,
+    myRides, myBookings, myStations, incomingRequests,
+  };
 }
 export async function searchStations(city = "") {
   let query = supabase.from("charging_stations").select("*").eq("status", "available").order("created_at", { ascending: false });
@@ -98,13 +135,10 @@ export async function createStation(payload: any) {
   if (error) throw error; return data;
 }
 export async function cancelBooking(bookingId: string) {
-  const user = await getCurrentUserOrThrow();
-  const { data, error } = await supabase.rpc("cancel_ride_booking", {
-    p_booking_id: bookingId,
-    p_passenger_id: user.id,
-  });
+  await getCurrentUserOrThrow();
+  // OS : cancel_my_booking (restitue les sièges si la résa était acceptée).
+  const { error } = await supabase.rpc("cancel_my_booking", { p_booking_id: bookingId });
   if (error) throw error;
-  return data;
 }
 export async function deleteRide(rideId: string) {
   const user = await getCurrentUserOrThrow();
